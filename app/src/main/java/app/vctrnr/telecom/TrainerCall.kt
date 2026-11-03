@@ -1,7 +1,9 @@
 package app.vctrnr.telecom
 
+import android.Manifest
 import android.content.ComponentName
 import android.content.Context
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -42,6 +44,11 @@ object TrainerCall {
 
     /** Asks Telecom for the call. False straight away if it can't be placed right now. */
     fun start(context: Context): Boolean {
+        // Granted at install (it's a "normal" permission), but check anyway.
+        if (context.checkSelfPermission(Manifest.permission.MANAGE_OWN_CALLS) != PackageManager.PERMISSION_GRANTED) {
+            state = State.Failed
+            return false
+        }
         val telecom = context.getSystemService(Context.TELECOM_SERVICE) as TelecomManager
         val handle = PhoneAccountHandle(ComponentName(context, TrainerConnectionService::class.java), ACCOUNT_ID)
         return try {
@@ -61,6 +68,10 @@ object TrainerCall {
                 Bundle().apply { putParcelable(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, handle) },
             )
             true
+        } catch (e: SecurityException) {
+            Log.w(TAG, "Not allowed to start the Telecom call", e)
+            state = State.Failed
+            false
         } catch (e: Exception) {
             Log.w(TAG, "Couldn't start the Telecom call", e)
             state = State.Failed
