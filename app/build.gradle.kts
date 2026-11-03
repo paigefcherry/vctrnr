@@ -5,7 +5,9 @@ plugins {
 
 android {
     namespace = "app.vctrnr"
-    compileSdk = 36
+    // Compose BOM 2026.09 / androidx.core 1.19 require compiling against Android 17 (API 37).
+    // This only affects which APIs are visible at build time; runtime behaviour follows targetSdk.
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "app.vctrnr"

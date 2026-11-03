@@ -115,4 +115,4 @@ Open the project in Android Studio, or from a terminal with JDK 17+ and the Andr
 ```
 
 Toolchain: Gradle 9.6, Android Gradle Plugin 9.5, Kotlin 2.4, Compose BOM 2026.09,
-compileSdk/targetSdk 36, minSdk 31.
+compileSdk 37, targetSdk 36, minSdk 31.
