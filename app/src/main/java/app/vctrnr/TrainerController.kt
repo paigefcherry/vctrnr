@@ -21,6 +21,7 @@ import app.vctrnr.audio.SpeechDetector
 import app.vctrnr.audio.TrainerEngine
 import app.vctrnr.media.EarbudControls
 import app.vctrnr.storage.RecordingStore
+import app.vctrnr.telecom.TrainerCall
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -139,11 +140,19 @@ class TrainerController(
             ContextCompat.RECEIVER_NOT_EXPORTED,
         )
         noisyRegistered = true
+        // Earbud "hang up" (or an incoming phone call) ends the session's call: stop.
+        TrainerCall.onEndedRemotely = {
+            if (_state.value.running) {
+                stop(playChime = false) // the earbuds play their own "call ended" sound
+                showMessage("Stopped from your earbuds")
+            }
+        }
         publishSummary()
     }
 
     /** vctrnr closed: stop everything and let go of audio. */
     fun close() {
+        TrainerCall.onEndedRemotely = null
         stop(playChime = false)
         controls?.release()
         controls = null
@@ -195,11 +204,10 @@ class TrainerController(
     fun stop(playChime: Boolean = true) {
         val eng = engine ?: return
         if (!eng.isRunning && !_state.value.running) return
-        eng.stop() // Saves (without playing) a take that was cut off mid-sentence.
-        output?.let {
-            it.stopSounds()
-            if (playChime) it.play(stopChime)
-        }
+        output?.stopSounds() // cut off a take that's playing
+        // Saves (without playing) a take that was cut off mid-sentence, and plays the stop
+        // chime wherever audio is going (the earbud call, in call mode).
+        eng.stop(chime = if (playChime) stopChime else null)
         if (wakeLock.isHeld) wakeLock.release()
         _state.update { it.copy(running = false, phase = null, levelDb = SpeechDetector.SILENCE_DB) }
         publishSummary()
@@ -287,6 +295,8 @@ class TrainerController(
     }
 
     private fun onFocusChange(change: Int) {
+        // Our own earbud "call" takes audio focus from us; that's expected, not an interruption.
+        if (TrainerCall.inCall) return
         when (change) {
             AudioManager.AUDIOFOCUS_LOSS -> {
                 // Another app started playing for real. Pressing Start takes it back.
@@ -344,12 +354,20 @@ class TrainerController(
     private fun showMessage(text: String) = _state.update { it.copy(message = text) }
 
     private fun applySettings(engine: TrainerEngine, s: TrainerSettings) {
-        engine.config = SpeechDetector.Config(sensitivity = s.sensitivity, endSilenceMs = s.pauseMs)
+        engine.config = SpeechDetector.Config(
+            sensitivity = s.sensitivity,
+            endSilenceMs = s.pauseMs,
+            preRollMs = PRE_ROLL_MS,
+        )
         engine.preferredMic = s.mic
+        engine.earbudPlayback = s.earbudPlayback
     }
 
     private companion object {
         const val WAKE_LOCK_TIMEOUT_MS = 4 * 60 * 60 * 1000L
+
+        /** Audio kept from before speech is detected, so the first syllable is never lost. */
+        const val PRE_ROLL_MS = 500
 
         val BLUETOOTH_OUTPUTS = setOf(
             AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,

@@ -4,10 +4,14 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- Switching the earbuds between call mode (mic) and music mode. -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- Earbud-mic sessions are registered as a self-managed VoIP call, so the earbuds'
+         "hang up" gesture reaches the app. Never places a real phone call. -->
+    <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" />
     <!-- Keep running with the screen off until you close vctrnr. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- The start/stop/close player in the notification shade and on the lock screen. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -45,9 +49,18 @@
         </activity>
 
         <service
+            android:name=".telecom.TrainerConnectionService"
+            android:exported="true"
+            android:permission="android.permission.BIND_TELECOM_CONNECTION_SERVICE">
+            <intent-filter>
+                <action android:name="android.telecom.ConnectionService" />
+            </intent-filter>
+        </service>
+
+        <service
             android:name=".TrainerService"
             android:exported="false"
-            android:foregroundServiceType="microphone|mediaPlayback" />
+            android:foregroundServiceType="microphone|mediaPlayback|phoneCall" />
     </application>
 
 </manifest>

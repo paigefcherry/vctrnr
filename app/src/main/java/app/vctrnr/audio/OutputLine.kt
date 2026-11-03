@@ -25,6 +25,8 @@ class OutputLine(
     val sampleRate: Int,
     private val mainHandler: Handler,
     private val onRouteChanged: (AudioDeviceInfo?) -> Unit,
+    /** Media by default; [VOICE_ATTRIBUTES] for playing takes through an earbud call. */
+    private val attributes: AudioAttributes = ATTRIBUTES,
 ) {
     private val lock = Any()
     private val queue = ArrayDeque<ShortArray>() // guarded by lock
@@ -47,6 +49,17 @@ class OutputLine(
     val isBusy: Boolean get() = synchronized(lock) { pendingSounds > 0 }
 
     val routedDevice: AudioDeviceInfo? get() = track?.routedDevice
+
+    /** True when sound goes to headphones/earbuds (so the mic can't hear it), not a speaker. */
+    val isPrivate: Boolean
+        get() = when (routedDevice?.type) {
+            AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+            AudioDeviceInfo.TYPE_BLE_HEADSET, AudioDeviceInfo.TYPE_HEARING_AID,
+            AudioDeviceInfo.TYPE_WIRED_HEADPHONES, AudioDeviceInfo.TYPE_WIRED_HEADSET,
+            AudioDeviceInfo.TYPE_USB_HEADSET,
+            -> true
+            else -> false
+        }
 
     fun start(): Boolean {
         if (running) return true
@@ -109,7 +122,7 @@ class OutputLine(
     private fun buildTrack(): AudioTrack {
         val minBuffer = AudioTrack.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
         return AudioTrack.Builder()
-            .setAudioAttributes(ATTRIBUTES)
+            .setAudioAttributes(attributes)
             .setAudioFormat(
                 AudioFormat.Builder()
                     .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
@@ -211,6 +224,12 @@ class OutputLine(
 
     companion object {
         private const val TAG = "vctrnr.Output"
+
+        /** Call audio: always goes wherever the call goes (the earbuds, in call mode). */
+        val VOICE_ATTRIBUTES: AudioAttributes = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+            .build()
 
         val ATTRIBUTES: AudioAttributes = AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_MEDIA)

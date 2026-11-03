@@ -11,6 +11,7 @@ import android.content.pm.ServiceInfo
 import android.graphics.drawable.Icon
 import android.os.Binder
 import android.os.IBinder
+import android.util.Log
 
 /**
  * Keeps vctrnr running with the screen off (phone in your pocket) from the moment you open
@@ -85,7 +86,14 @@ class TrainerService : Service() {
     fun goForeground() {
         var types = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
         if (controller.hasMicPermission()) types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-        startForeground(NOTIFICATION_ID, buildNotification(), types)
+        val notification = buildNotification()
+        try {
+            // phoneCall: keeps the earbud-mic "call" healthy with the screen off.
+            startForeground(NOTIFICATION_ID, notification, types or ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL)
+        } catch (e: SecurityException) {
+            Log.w("vctrnr.Service", "phoneCall service type refused; continuing without it", e)
+            startForeground(NOTIFICATION_ID, notification, types)
+        }
     }
 
     private fun shutdown() {

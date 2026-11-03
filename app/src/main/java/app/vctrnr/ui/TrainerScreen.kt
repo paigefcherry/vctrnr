@@ -60,6 +60,7 @@ import app.vctrnr.OutputRoute
 import app.vctrnr.R
 import app.vctrnr.TrainerSettings
 import app.vctrnr.UiState
+import app.vctrnr.audio.EarbudPlayback
 import app.vctrnr.audio.Mic
 import app.vctrnr.audio.TrainerEngine.Phase
 import app.vctrnr.storage.RecordingStore
@@ -325,13 +326,46 @@ private fun SettingsCard(settings: TrainerSettings, enabled: Boolean, onChange: 
             }
             Text(
                 when {
-                    !enabled -> "Stop to change the microphone."
-                    settings.mic == Mic.Earbuds -> "Hands-free. Call-quality mic, and a 1–2 s switch before each playback."
-                    else -> "Best quality and instant playback. Keep the phone in front of you."
+                    settings.mic == Mic.Earbuds -> "Hands-free: walk around with the phone in your pocket. Call-quality mic."
+                    else -> "Best quality. Keep the phone in front of you."
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (settings.mic == Mic.Earbuds) {
+                Spacer(Modifier.height(10.dp))
+                Text("Earbud playback", style = MaterialTheme.typography.titleSmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = settings.earbudPlayback == EarbudPlayback.Instant,
+                        onClick = { onChange(settings.copy(earbudPlayback = EarbudPlayback.Instant)) },
+                        label = { Text("Instant") },
+                        enabled = enabled,
+                    )
+                    FilterChip(
+                        selected = settings.earbudPlayback == EarbudPlayback.FullQuality,
+                        onClick = { onChange(settings.copy(earbudPlayback = EarbudPlayback.FullQuality)) },
+                        label = { Text("Full quality") },
+                        enabled = enabled,
+                    )
+                }
+                Text(
+                    if (settings.earbudPlayback == EarbudPlayback.Instant) {
+                        "Plays back right away, at call quality. Double-tap an earbud (hang up) to stop."
+                    } else {
+                        "Switches the buds to music mode for each playback: better sound, 1–2 s slower. Tap during playback to stop."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (!enabled) {
+                Text(
+                    "Stop to change these.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
             Spacer(Modifier.height(12.dp))
             LabeledValue("Pause before playback", secondsLabel(settings.pauseMs))
             Slider(
@@ -381,6 +415,8 @@ private fun FolderLink(onOpenFolder: () -> Unit) {
 private fun takesLabel(state: UiState): String = when {
     state.takes == 1 -> "1 take saved this session"
     state.takes > 1 -> "${state.takes} takes saved this session"
+    state.running && state.micInUse == Mic.Earbuds && state.settings.earbudPlayback == EarbudPlayback.Instant ->
+        "Lock the phone and walk. Double-tap an earbud to stop"
     state.running -> "You can lock the phone. Takes save automatically"
     else -> " "
 }

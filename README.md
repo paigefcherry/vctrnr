@@ -24,11 +24,11 @@ over an older one as an update and your settings are kept.
 
 - **Start**: tap the big button, tap an earbud, or press ▶ on the lock-screen player.
   You'll hear a short rising chime.
-- With the earbud mic, wait for the **soft tick**, then talk.
-- **Pause**. After the pause (1 s by default) your take plays back. Wait for the tick again
-  before the next take.
-- **Stop**: tap again (falling chime). If you stop mid-sentence, that take is still saved,
-  just not played.
+- With the earbud mic, wait for the **soft tick** (the call is connected), then talk.
+- **Pause**. After the pause (1 s by default) your take plays back, then it's listening
+  again. (In Full quality mode, wait for the tick before your next take.)
+- **Stop**: tap the button / lock-screen player, or from the earbuds (see the table below).
+  If you stop mid-sentence, that take is still saved, just not played.
 - Lock the phone and put it away whenever you like. It keeps running.
 
 ### Open vs. closed
@@ -40,27 +40,31 @@ vctrnr). Once closed, nothing of it runs and earbud taps go back to your other a
 
 ### Microphone: earbuds or phone
 
-| | Earbuds (default) | Phone |
-|---|---|---|
-| Hands-free / walking around | ✅ | ❌ phone in front of you |
-| Recording quality | Call quality: noise-suppressed, fine for pitch, less faithful for timbre/resonance | Best: no gain control or noise suppression |
-| Playback quality | Full quality | Full quality |
-| Delay before playback | Pause + ~1–2 s while the buds switch modes | Pause only |
+| | Earbuds · Instant (default) | Earbuds · Full quality | Phone |
+|---|---|---|---|
+| Hands-free / walking around | ✅ | ✅ | ❌ phone in front of you |
+| Recording | Call quality (noise-suppressed) | Call quality | Best (no gain control or noise suppression) |
+| Playback | Instant, call quality | Full quality, after a 1–2 s switch | Instant, full quality |
+| Stop from the earbuds | **Double-tap** ("hang up"), any time | Tap **during playback** | Tap, any time |
 
-Bluetooth earbuds can only send their mic audio over the **call** channel. So in earbud mode
-vctrnr listens with the buds in call mode, flips them back to music mode to play your take
-at full quality, then flips back to call mode and ticks when it's listening again. If the
-earbud mic isn't available, it falls back to the phone mic and tells you.
+Bluetooth earbuds can only send their mic audio over the **call** channel, and while they're
+in call mode their gestures become call controls: a single tap does nothing, a double tap
+means "hang up". So:
 
-**Heads-up:** while the buds are in call mode (i.e. while it's listening), a single tap may
-not reach vctrnr. That depends on the Buds' firmware and needs testing on yours. Tapping
-while a take is **playing back** always works, and so does the lock-screen player.
+- **Instant** keeps the buds in call mode for the whole session and registers it with
+  Android as a (silent, never dialled) VoIP call. Double-tapping an earbud "hangs up", which
+  stops the session. Android may show it like an ongoing call while it runs, and a real
+  incoming phone call stops it.
+- **Full quality** switches the buds to music mode for each playback and back again. The
+  switch itself takes the Bluetooth hardware about a second each way.
+
+If the earbud mic isn't available, vctrnr falls back to the phone mic and tells you.
 
 ### Settings
 
 | Setting | What it does |
 |---|---|
-| Microphone | See above. Change it while stopped. |
+| Microphone, Earbud playback | See above. Change them while stopped. |
 | Pause before playback | How long a silence ends a take (0.4 to 4 s). Raise it if you're reading longer passages and it cuts you off between sentences. |
 | Mic sensitivity | Raise it if quiet speech isn't picked up. Lower it if background noise triggers playbacks. |
 
@@ -98,6 +102,7 @@ stay put if you uninstall the app.
 | Speech detection: adaptive noise floor + a pitch-periodicity ("is this a voice?") check, so footsteps, thumps and wind noise don't trigger playback. Pre-roll so the first syllable isn't clipped. | [`audio/SpeechDetector.kt`](app/src/main/java/app/vctrnr/audio/SpeechDetector.kt) |
 | Record → wait for the pause → play loop, including the earbud call-mode ↔ music-mode flip. The mic is ignored while anything plays, so it never hears itself. | [`audio/TrainerEngine.kt`](app/src/main/java/app/vctrnr/audio/TrainerEngine.kt) |
 | Switching the buds between call mode and music mode. | [`audio/EarbudMic.kt`](app/src/main/java/app/vctrnr/audio/EarbudMic.kt) |
+| The session-as-a-VoIP-call registration, so "hang up" on the earbuds stops it. | [`telecom/TrainerCall.kt`](app/src/main/java/app/vctrnr/telecom/TrainerCall.kt) |
 | The always-running (silent) media stream that plays takes and chimes. | [`audio/OutputLine.kt`](app/src/main/java/app/vctrnr/audio/OutputLine.kt) |
 | Media session: earbud play/pause → start/stop, lock-screen player, Close. | [`media/EarbudControls.kt`](app/src/main/java/app/vctrnr/media/EarbudControls.kt) |
 | Foreground service: keeps it running with the screen off until you close it. | [`TrainerService.kt`](app/src/main/java/app/vctrnr/TrainerService.kt) |

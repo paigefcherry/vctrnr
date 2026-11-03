@@ -9,6 +9,8 @@ import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.os.Handler
+import android.os.Looper
 import android.os.Process
 import android.os.SystemClock
 import android.util.Log
@@ -17,10 +19,11 @@ import android.util.Log
  * The record → wait for a pause → play it back loop. Runs on its own audio thread between
  * [start] and [stop]; the microphone is only open while it's running.
  *
- * With [Mic.Earbuds] each cycle is:
- *   call mode (earbud mic live) → you talk, then pause → music mode → take plays at full
- *   quality → call mode again → soft tick → listening.
- * With [Mic.Phone] the earbuds stay in music mode the whole time and playback is instant.
+ * - [Mic.Phone]: the earbuds stay in music mode; playback is instant and full quality.
+ * - [Mic.Earbuds] + [EarbudPlayback.Instant]: the earbuds stay in call mode all session (as a
+ *   Telecom call, so "hang up" on the buds stops it); playback is instant, call quality.
+ * - [Mic.Earbuds] + [EarbudPlayback.FullQuality]: listen in call mode, flip to music mode to
+ *   play each take, flip back, tick.
  */
 class TrainerEngine(
     context: Context,
@@ -43,6 +46,7 @@ class TrainerEngine(
     }
 
     private val appContext = context.applicationContext
+    private val main = Handler(Looper.getMainLooper())
     val sampleRate: Int get() = output.sampleRate
 
     private val detector = SpeechDetector(output.sampleRate)
@@ -50,6 +54,7 @@ class TrainerEngine(
     private val readyTick = Pcm.tick(output.sampleRate)
 
     @Volatile private var running = false
+    @Volatile private var stopChime: ShortArray? = null
     private var thread: Thread? = null
 
     val isRunning: Boolean get() = running
@@ -60,24 +65,40 @@ class TrainerEngine(
             detector.config = value
         }
 
-    /** Mic to use. Takes effect the next time the engine starts. */
+    /** Mic and earbud playback style. Take effect the next time the engine starts. */
     @Volatile var preferredMic: Mic = Mic.Earbuds
+    @Volatile var earbudPlayback: EarbudPlayback = EarbudPlayback.Instant
 
     fun start() {
         if (running) return
+        stopChime = null
         running = true
         thread = Thread(::run, "vctrnr-capture").also { it.start() }
     }
 
-    /** Stops the loop and closes the mic. A take in progress is saved (not played). */
-    fun stop() {
+    /**
+     * Stops the loop and closes the mic. A take in progress is saved (not played). [chime] is
+     * played wherever audio is currently going (the call, if in call mode).
+     */
+    fun stop(chime: ShortArray? = null) {
+        stopChime = chime
         running = false
-        thread?.join(2500)
+        thread?.join(3000)
         thread = null
     }
 
-    /** The open microphone, and whether the earbuds are in call mode for it. */
-    private class Capture(var record: AudioRecord?, var callMode: Boolean)
+    /**
+     * The open microphone and where takes/cues play. [callLine] is our own call-audio output,
+     * used in whole-session call mode. [flip] = switch to music mode for each playback.
+     */
+    private class Capture(
+        var record: AudioRecord?,
+        var callMode: Boolean,
+        var callLine: OutputLine?,
+        val flip: Boolean,
+    )
+
+    private fun Capture.line(): OutputLine = callLine ?: output
 
     private fun run() {
         Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
@@ -87,21 +108,23 @@ class TrainerEngine(
         }
         var capture: Capture? = null
         try {
-            // Let the start chime finish in full quality before switching anything.
-            waitUntilQuiet()
+            // Let the start chime finish in full quality before switching the earbuds over.
+            if (preferredMic == Mic.Earbuds) waitUntilQuiet(output)
             if (!running) return
-            capture = openCapture(preferredMic)
+            capture = openCapture(preferredMic, earbudPlayback)
             if (capture == null) {
                 if (running) fail("Couldn't open the microphone (another app may be using it)")
                 return
             }
-            if (capture.callMode) output.play(readyTick)
+            if (capture.callMode) capture.line().play(readyTick)
             loop(capture)
         } catch (e: Exception) {
             Log.e(TAG, "capture crashed", e)
             fail("Recording stopped: ${e.message}")
         } finally {
             capture?.record?.let { closeRecord(it) }
+            playStopChime(capture)
+            capture?.callLine?.release()
             if (capture?.callMode == true) earbudMic.exit()
         }
     }
@@ -109,8 +132,8 @@ class TrainerEngine(
     private fun loop(capture: Capture) {
         val frame = ShortArray(detector.frameSize)
         detector.reset()
-        var ignoreMic = true // something (a chime) may be playing; wait for quiet first
-        var playingTake = false // so the UI only says "playing back" for actual takes
+        var ignoreMic = false
+        var playingTake = false // a take (not just a chime) is playing
         var cooldownUntil = 0L
         var phase = Phase.Listening
         var frameCount = 0
@@ -122,12 +145,14 @@ class TrainerEngine(
                 break
             }
             val now = SystemClock.elapsedRealtime()
+            val line = capture.line()
 
-            if (output.isBusy) {
-                // Don't listen to ourselves: ignore the mic while anything is playing,
-                // and for a moment after (Bluetooth latency + room echo).
+            // Don't listen to ourselves: ignore the mic while a take plays, and for a moment
+            // after. Chimes/ticks only mute the mic if they come out of a speaker; in earbuds
+            // the mic can't hear them, and you may already be talking.
+            if (line.isBusy && (playingTake || !line.isPrivate)) {
                 ignoreMic = true
-                cooldownUntil = now + COOLDOWN_MS
+                cooldownUntil = now + if (line.isPrivate) PRIVATE_COOLDOWN_MS else SPEAKER_COOLDOWN_MS
                 phase = if (playingTake) Phase.Playing else Phase.Listening
             } else if (now < cooldownUntil) {
                 phase = if (playingTake) Phase.Playing else Phase.Listening
@@ -143,16 +168,17 @@ class TrainerEngine(
                     is SpeechDetector.Event.SpeechEnded -> {
                         val take = prepare(event.utterance.pcm)
                         listener.onTake(take, sampleRate, playedBack = true)
-                        if (capture.callMode) {
+                        if (capture.flip && capture.callMode) {
                             if (!playInMusicMode(capture, take)) break
+                            playingTake = false
                             phase = Phase.Listening
                         } else {
-                            output.play(take)
+                            line.play(take)
                             playingTake = true
                             phase = Phase.Playing
                         }
                         ignoreMic = true
-                        cooldownUntil = SystemClock.elapsedRealtime() + COOLDOWN_MS
+                        cooldownUntil = SystemClock.elapsedRealtime() + PRIVATE_COOLDOWN_MS
                     }
                     null -> if (!detector.isSpeaking) phase = Phase.Listening
                 }
@@ -169,7 +195,7 @@ class TrainerEngine(
     }
 
     /**
-     * Earbud-mic cycle: close the mic, flip the earbuds to music mode, play the take, then go
+     * Full-quality cycle: close the mic, flip the earbuds to music mode, play the take, then go
      * back to call mode. Returns false if the session was stopped (or failed) meanwhile.
      */
     private fun playInMusicMode(capture: Capture, take: ShortArray): Boolean {
@@ -183,11 +209,11 @@ class TrainerEngine(
         if (!running) return false
 
         output.play(take)
-        waitUntilQuiet()
-        sleepWhileRunning(COOLDOWN_MS)
+        waitUntilQuiet(output)
+        sleepWhileRunning(PRIVATE_COOLDOWN_MS)
         if (!running) return false
 
-        val next = openCapture(Mic.Earbuds) ?: run {
+        val next = openCapture(Mic.Earbuds, EarbudPlayback.FullQuality) ?: run {
             if (running) fail("Couldn't reopen the microphone")
             return false
         }
@@ -201,14 +227,23 @@ class TrainerEngine(
      * Opens the requested mic. For the earbuds that means entering call mode first; if that
      * doesn't work out, falls back to the phone mic so the session still works.
      */
-    private fun openCapture(want: Mic): Capture? {
+    private fun openCapture(want: Mic, playback: EarbudPlayback): Capture? {
         if (want == Mic.Earbuds) {
             status(Phase.Preparing)
-            if (earbudMic.enter(::stopping)) {
+            val instant = playback == EarbudPlayback.Instant
+            val entered = if (instant) earbudMic.enterAsCall(::stopping) else earbudMic.enter(::stopping)
+            if (entered) {
                 val record = buildRecord(callMode = true)
                 if (record != null && startRecord(record) && !routedToPhoneMic(record)) {
+                    // Whole-session call mode: play takes as call audio, so they follow the call.
+                    val callLine = if (instant) {
+                        OutputLine(sampleRate, main, onRouteChanged = {}, attributes = OutputLine.VOICE_ATTRIBUTES)
+                            .takeIf { it.start() }
+                    } else {
+                        null
+                    }
                     listener.onMicInUse(Mic.Earbuds, null)
-                    return Capture(record, callMode = true)
+                    return Capture(record, callMode = true, callLine = callLine, flip = !instant)
                 }
                 record?.let { closeRecord(it) }
                 earbudMic.exit()
@@ -223,7 +258,21 @@ class TrainerEngine(
             closeRecord(record)
             return null
         }
-        return Capture(record, callMode = false)
+        return Capture(record, callMode = false, callLine = null, flip = false)
+    }
+
+    /** The stop chime goes wherever audio is going right now, then we wait for it in call mode. */
+    private fun playStopChime(capture: Capture?) {
+        val chime = stopChime ?: return
+        val callLine = capture?.callLine
+        if (capture != null && callLine != null && capture.callMode) {
+            callLine.stopSounds()
+            callLine.play(chime)
+            val until = SystemClock.elapsedRealtime() + 900
+            while (callLine.isBusy && SystemClock.elapsedRealtime() < until) SystemClock.sleep(20)
+        } else {
+            output.play(chime)
+        }
     }
 
     private fun startRecord(record: AudioRecord): Boolean {
@@ -304,8 +353,8 @@ class TrainerEngine(
 
     private fun stopping() = !running
 
-    private fun waitUntilQuiet() {
-        while (running && output.isBusy) SystemClock.sleep(20)
+    private fun waitUntilQuiet(line: OutputLine) {
+        while (running && line.isBusy) SystemClock.sleep(20)
     }
 
     private fun sleepWhileRunning(ms: Long) {
@@ -320,7 +369,12 @@ class TrainerEngine(
 
     companion object {
         private const val TAG = "vctrnr.Engine"
-        private const val COOLDOWN_MS = 300L
+
+        /** After a take plays in earbuds/headphones: just enough for Bluetooth latency. */
+        private const val PRIVATE_COOLDOWN_MS = 120L
+
+        /** After anything plays from the phone speaker: let the room echo die down too. */
+        private const val SPEAKER_COOLDOWN_MS = 300L
 
         /** 48 kHz is the S23's native rate (no resampling); 44.1 kHz is the universal fallback. */
         fun pickSampleRate(): Int = listOf(48_000, 44_100).firstOrNull {
