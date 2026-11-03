@@ -101,8 +101,9 @@ class TrainerEngine(
         val frame = ShortArray(detector.frameSize)
         detector.reset()
         var playbackActive = true // the start chime is playing; wait for it
+        var playingTake = false // false while it's only a chime, so the UI doesn't say "playing back"
         var cooldownUntil = 0L
-        var phase = Phase.Playing
+        var phase = Phase.Listening
         var frameCount = 0
 
         while (running) {
@@ -117,12 +118,13 @@ class TrainerEngine(
                 // and for a moment after (Bluetooth latency + room echo).
                 playbackActive = true
                 cooldownUntil = now + COOLDOWN_MS
-                phase = Phase.Playing
+                phase = if (playingTake) Phase.Playing else Phase.Listening
             } else if (now < cooldownUntil) {
-                phase = Phase.Playing
+                phase = if (playingTake) Phase.Playing else Phase.Listening
             } else {
                 if (playbackActive) {
                     playbackActive = false
+                    playingTake = false
                     detector.reset()
                 }
                 when (val event = detector.process(frame)) {
@@ -133,6 +135,7 @@ class TrainerEngine(
                         output.play(take)
                         listener.onTake(take, sampleRate, playedBack = true)
                         playbackActive = true
+                        playingTake = true
                         cooldownUntil = now + COOLDOWN_MS
                         phase = Phase.Playing
                     }
@@ -141,7 +144,7 @@ class TrainerEngine(
             }
 
             if (frameCount++ % 2 == 0) {
-                val level = if (phase == Phase.Playing) SpeechDetector.SILENCE_DB else detector.levelDb
+                val level = if (playbackActive) SpeechDetector.SILENCE_DB else detector.levelDb
                 listener.onStatus(phase, level, detector.onsetThresholdDb)
             }
         }

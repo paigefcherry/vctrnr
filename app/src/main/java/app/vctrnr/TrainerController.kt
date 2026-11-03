@@ -151,7 +151,7 @@ class TrainerController(
         out.play(startChime)
         eng.start()
         controls?.setRunning(true)
-        _state.update { it.copy(running = true, phase = TrainerEngine.Phase.Playing, takes = 0, message = null) }
+        _state.update { it.copy(running = true, phase = TrainerEngine.Phase.Listening, takes = 0, message = null) }
     }
 
     fun stop(playChime: Boolean = true) {
