@@ -63,7 +63,6 @@ import app.vctrnr.UiState
 import app.vctrnr.audio.Mic
 import app.vctrnr.audio.TrainerEngine.Phase
 import app.vctrnr.storage.RecordingStore
-import java.util.Locale
 import kotlin.math.roundToInt
 
 @Composable
@@ -334,7 +333,7 @@ private fun SettingsCard(settings: TrainerSettings, enabled: Boolean, onChange: 
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(12.dp))
-            LabeledValue("Pause before playback", String.format(Locale.getDefault(), "%.1f s", settings.pauseMs / 1000f))
+            LabeledValue("Pause before playback", secondsLabel(settings.pauseMs))
             Slider(
                 value = settings.pauseMs.toFloat(),
                 onValueChange = { onChange(settings.copy(pauseMs = ((it / 100f).roundToInt() * 100))) },
@@ -385,6 +384,9 @@ private fun takesLabel(state: UiState): String = when {
     state.running -> "You can lock the phone. Takes save automatically"
     else -> " "
 }
+
+/** "1.2 s". The slider snaps to 0.1 s steps, so integer maths is exact (and locale-free). */
+private fun secondsLabel(ms: Int): String = "${ms / 1000}.${(ms % 1000) / 100} s"
 
 private fun sensitivityLabel(s: Float) = when {
     s < 0.34f -> "Low"
