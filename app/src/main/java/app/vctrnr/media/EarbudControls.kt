@@ -5,27 +5,34 @@ import android.content.Intent
 import android.media.MediaMetadata
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
+import android.os.Bundle
 import android.os.Handler
 import android.os.SystemClock
 import android.view.KeyEvent
 import androidx.core.content.IntentCompat
+import app.vctrnr.R
 import app.vctrnr.audio.OutputLine
 
 /**
  * A media session that makes the earbuds' play/pause gesture (single tap on Galaxy Buds)
- * start and stop the trainer, exactly like the on-screen button.
+ * start and stop the trainer, exactly like the on-screen button. It also drives the player
+ * shown in the notification shade and on the lock screen (play/pause + Close).
  *
- * Only exists while the app is on screen. No media-button receiver is registered in the
- * manifest, so taps can never relaunch the app once it's closed.
+ * Only exists while vctrnr is open. No media-button receiver is registered in the manifest,
+ * so taps can never relaunch the app once it's closed.
  */
 class EarbudControls(
     context: Context,
     handler: Handler,
     private val onToggle: () -> Unit,
     private val onStopRequested: () -> Unit,
+    private val onCloseRequested: () -> Unit,
 ) {
     private val session = MediaSession(context, "vctrnr")
     private var lastToggleAt = 0L
+    private var running = false
+
+    val sessionToken: MediaSession.Token get() = session.sessionToken
 
     init {
         session.setCallback(
@@ -52,29 +59,29 @@ class EarbudControls(
                     }
                 }
 
-                // Some Bluetooth stacks / controllers use transport controls instead of keys.
+                // Lock-screen / notification player buttons, and Bluetooth stacks that use
+                // transport controls instead of key events.
                 override fun onPlay() = tap()
                 override fun onPause() = tap()
                 override fun onStop() = onStopRequested()
+
+                override fun onCustomAction(action: String, extras: Bundle?) {
+                    if (action == ACTION_CLOSE) onCloseRequested()
+                }
             },
             handler,
         )
         session.setPlaybackToLocal(OutputLine.ATTRIBUTES)
-        session.setMetadata(
-            MediaMetadata.Builder()
-                .putString(MediaMetadata.METADATA_KEY_TITLE, "vctrnr")
-                .putString(MediaMetadata.METADATA_KEY_ARTIST, "Tap an earbud to start or stop")
-                .build(),
-        )
-        setRunning(false)
+        update(running = false, status = "Off")
         session.isActive = true
     }
 
     /**
-     * Reported to the earbuds over Bluetooth (AVRCP): "playing" while the trainer is on, so
-     * the next tap is sent as pause, and vice versa.
+     * [running] is reported to the earbuds over Bluetooth as "playing", so the next tap is
+     * sent as pause, and vice versa. [status] is shown as the subtitle in the media player.
      */
-    fun setRunning(running: Boolean) {
+    fun update(running: Boolean, status: String) {
+        this.running = running
         session.setPlaybackState(
             PlaybackState.Builder()
                 .setActions(
@@ -86,6 +93,15 @@ class EarbudControls(
                     PlaybackState.PLAYBACK_POSITION_UNKNOWN,
                     if (running) 1f else 0f,
                 )
+                .addCustomAction(
+                    PlaybackState.CustomAction.Builder(ACTION_CLOSE, "Close vctrnr", R.drawable.ic_close).build(),
+                )
+                .build(),
+        )
+        session.setMetadata(
+            MediaMetadata.Builder()
+                .putString(MediaMetadata.METADATA_KEY_TITLE, "vctrnr")
+                .putString(MediaMetadata.METADATA_KEY_ARTIST, status)
                 .build(),
         )
     }
@@ -105,5 +121,6 @@ class EarbudControls(
 
     private companion object {
         const val DEBOUNCE_MS = 400L
+        const val ACTION_CLOSE = "app.vctrnr.CLOSE"
     }
 }

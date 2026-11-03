@@ -2,6 +2,15 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Switching the earbuds between call mode (mic) and music mode. -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- Keep running with the screen off until you close vctrnr. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- The start/stop/close player in the notification shade and on the lock screen. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <uses-feature
         android:name="android.hardware.microphone"
@@ -12,8 +21,8 @@
         <package android:name="com.sec.android.app.myfiles" />
     </queries>
 
-    <!-- No services, no media-button receiver, no boot receiver: when the activity is
-         closed, nothing of this app runs. -->
+    <!-- No boot receiver and no media-button receiver: once you close vctrnr, nothing of it
+         runs, and earbud taps can't wake it back up. -->
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
@@ -22,8 +31,8 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Vctrnr">
 
-        <!-- configChanges: rotating the phone or toggling dark mode shouldn't restart
-             the activity (which would stop a session in progress). -->
+        <!-- configChanges: rotating the phone or toggling dark mode shouldn't recreate the
+             screen mid-session. -->
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density"
@@ -34,6 +43,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".TrainerService"
+            android:exported="false"
+            android:foregroundServiceType="microphone|mediaPlayback" />
     </application>
 
 </manifest>

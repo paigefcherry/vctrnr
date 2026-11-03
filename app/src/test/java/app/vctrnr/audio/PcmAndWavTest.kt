@@ -45,6 +45,14 @@ class PcmAndWavTest {
     }
 
     @Test
+    fun readyTickIsShortAndQuiet() {
+        val t = Pcm.tick(48000)
+        assertTrue(t.size in 3000..4000) // ~70 ms
+        assertTrue(Pcm.peak(t) in 1000..4000)
+        assertTrue(kotlin.math.abs(t.last().toInt()) < 100) // decays away, no click at the end
+    }
+
+    @Test
     fun wavHeaderIsValid() {
         val pcm = shortArrayOf(1, -2, 3, 32767, -32768)
         val bytes = Wav.encode(pcm, 48000)

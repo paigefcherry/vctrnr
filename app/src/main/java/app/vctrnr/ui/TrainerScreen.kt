@@ -31,6 +31,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -59,6 +60,7 @@ import app.vctrnr.OutputRoute
 import app.vctrnr.R
 import app.vctrnr.TrainerSettings
 import app.vctrnr.UiState
+import app.vctrnr.audio.Mic
 import app.vctrnr.audio.TrainerEngine.Phase
 import app.vctrnr.storage.RecordingStore
 import java.util.Locale
@@ -72,6 +74,7 @@ fun TrainerScreen(
     onSettingsChange: (TrainerSettings) -> Unit,
     onRequestMic: () -> Unit,
     onMessageShown: () -> Unit,
+    onClose: () -> Unit,
 ) {
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(state.message) {
@@ -90,8 +93,8 @@ fun TrainerScreen(
                 .padding(horizontal = 20.dp, vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Header(state.route)
-            Spacer(Modifier.height(36.dp))
+            Header(state, onClose)
+            Spacer(Modifier.height(28.dp))
 
             BigButton(state, onToggle)
             Spacer(Modifier.height(20.dp))
@@ -110,7 +113,7 @@ fun TrainerScreen(
                 MicPermissionCard(state.micPermanentlyDenied, onRequestMic)
                 Spacer(Modifier.height(12.dp))
             }
-            SettingsCard(state.settings, onSettingsChange)
+            SettingsCard(state.settings, enabled = !state.running, onSettingsChange)
             Spacer(Modifier.height(8.dp))
             FolderLink(onOpenFolder)
         }
@@ -118,16 +121,39 @@ fun TrainerScreen(
 }
 
 @Composable
-private fun Header(route: OutputRoute) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("vctrnr", fontSize = 34.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
-        Text(
-            "Speak, pause, hear yourself back",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(14.dp))
-        RouteChip(route)
+private fun Header(state: UiState, onClose: () -> Unit) {
+    Box(Modifier.fillMaxWidth()) {
+        Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("vctrnr", fontSize = 34.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+            Text(
+                "Speak, pause, hear yourself back",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        // Closing is explicit now (vctrnr keeps running with the screen off until you do).
+        TextButton(onClick = onClose, modifier = Modifier.align(Alignment.TopEnd)) {
+            Icon(painterResource(R.drawable.ic_close), contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(4.dp))
+            Text("Close")
+        }
+    }
+    Spacer(Modifier.height(14.dp))
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        RouteChip(state.route)
+        MicChip(state.micInUse ?: state.settings.mic)
+    }
+}
+
+@Composable
+private fun MicChip(mic: Mic) {
+    val colors = MaterialTheme.colorScheme
+    Surface(shape = RoundedCornerShape(50), color = colors.surfaceVariant, contentColor = colors.onSurfaceVariant) {
+        Row(Modifier.padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(painterResource(R.drawable.ic_mic), contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(if (mic == Mic.Earbuds) "Earbud mic" else "Phone mic", style = MaterialTheme.typography.labelLarge)
+        }
     }
 }
 
@@ -136,7 +162,7 @@ private fun RouteChip(route: OutputRoute) {
     val (icon, label, warn) = when (route) {
         is OutputRoute.Earbuds -> Triple(R.drawable.ic_headphones, route.name.ifBlank { "Bluetooth earbuds" }, false)
         OutputRoute.Wired -> Triple(R.drawable.ic_headphones, "Wired headphones", false)
-        OutputRoute.Speaker -> Triple(R.drawable.ic_speaker, "Phone speaker. Connect your earbuds", true)
+        OutputRoute.Speaker -> Triple(R.drawable.ic_speaker, "Phone speaker", true)
     }
     val colors = MaterialTheme.colorScheme
     Surface(
@@ -159,13 +185,13 @@ private fun BigButton(state: UiState, onToggle: () -> Unit) {
         targetValue = when {
             !state.running -> colors.primary
             state.phase == Phase.Hearing -> colors.tertiary
-            state.phase == Phase.Playing -> colors.secondary
+            state.phase == Phase.Playing || state.phase == Phase.Preparing -> colors.secondary
             else -> colors.primary
         },
         label = "accent",
     )
     val level by animateFloatAsState(
-        targetValue = if (state.running && state.phase != Phase.Playing) meterFraction(state.levelDb) else 0f,
+        targetValue = if (state.running && state.phase in LISTENING_PHASES) meterFraction(state.levelDb) else 0f,
         animationSpec = tween(80),
         label = "level",
     )
@@ -223,6 +249,7 @@ private fun BigButton(state: UiState, onToggle: () -> Unit) {
 private fun StatusLine(state: UiState) {
     val text = when {
         !state.running -> "Tap the button, or tap an earbud, to start"
+        state.phase == Phase.Preparing -> "Getting the earbud mic ready…"
         state.phase == Phase.Hearing -> "Hearing you…"
         state.phase == Phase.Playing -> "Playing it back…"
         else -> "Listening. Say something"
@@ -234,7 +261,7 @@ private fun StatusLine(state: UiState) {
 @Composable
 private fun LevelMeter(state: UiState) {
     val colors = MaterialTheme.colorScheme
-    val active = state.running && state.phase != Phase.Playing
+    val active = state.running && state.phase in LISTENING_PHASES
     val level by animateFloatAsState(if (active) meterFraction(state.levelDb) else 0f, tween(60), label = "meter")
     val over = active && state.levelDb >= state.thresholdDb
     BoxWithConstraints(
@@ -279,9 +306,34 @@ private fun MicPermissionCard(permanentlyDenied: Boolean, onRequestMic: () -> Un
 }
 
 @Composable
-private fun SettingsCard(settings: TrainerSettings, onChange: (TrainerSettings) -> Unit) {
+private fun SettingsCard(settings: TrainerSettings, enabled: Boolean, onChange: (TrainerSettings) -> Unit) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+            Text("Microphone", style = MaterialTheme.typography.titleSmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = settings.mic == Mic.Earbuds,
+                    onClick = { onChange(settings.copy(mic = Mic.Earbuds)) },
+                    label = { Text("Earbuds") },
+                    enabled = enabled,
+                )
+                FilterChip(
+                    selected = settings.mic == Mic.Phone,
+                    onClick = { onChange(settings.copy(mic = Mic.Phone)) },
+                    label = { Text("Phone") },
+                    enabled = enabled,
+                )
+            }
+            Text(
+                when {
+                    !enabled -> "Stop to change the microphone."
+                    settings.mic == Mic.Earbuds -> "Hands-free. Call-quality mic, and a 1–2 s switch before each playback."
+                    else -> "Best quality and instant playback. Keep the phone in front of you."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(12.dp))
             LabeledValue("Pause before playback", String.format(Locale.getDefault(), "%.1f s", settings.pauseMs / 1000f))
             Slider(
                 value = settings.pauseMs.toFloat(),
@@ -330,7 +382,7 @@ private fun FolderLink(onOpenFolder: () -> Unit) {
 private fun takesLabel(state: UiState): String = when {
     state.takes == 1 -> "1 take saved this session"
     state.takes > 1 -> "${state.takes} takes saved this session"
-    state.running -> "Takes are saved automatically"
+    state.running -> "You can lock the phone. Takes save automatically"
     else -> " "
 }
 
@@ -339,6 +391,8 @@ private fun sensitivityLabel(s: Float) = when {
     s < 0.67f -> "Medium"
     else -> "High"
 }
+
+private val LISTENING_PHASES = setOf(Phase.Listening, Phase.Hearing)
 
 /** Map dBFS onto the meter: -75 dB = empty, -15 dB = full. */
 private fun meterFraction(db: Float): Float = ((db + 75f) / 60f).coerceIn(0f, 1f)

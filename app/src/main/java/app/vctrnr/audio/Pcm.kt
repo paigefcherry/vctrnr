@@ -52,6 +52,21 @@ object Pcm {
     fun silence(sampleRate: Int, ms: Int): ShortArray = ShortArray(sampleRate * ms / 1000)
 
     /**
+     * A single short, quiet tick: "the earbud mic is live again, go ahead". Played after each
+     * playback when listening through the earbuds, since switching back takes a second or two.
+     */
+    fun tick(sampleRate: Int): ShortArray {
+        val n = sampleRate * 70 / 1000
+        val attack = sampleRate * 3 / 1000
+        val decayTau = sampleRate * 0.018
+        val amplitude = 0.12 * 32767
+        return ShortArray(n) { i ->
+            val env = if (i < attack) i.toDouble() / attack else exp(-(i - attack) / decayTau)
+            (amplitude * env * sin(2 * PI * 1320.0 * i / sampleRate)).roundToInt().toShort()
+        }
+    }
+
+    /**
      * A soft two-note chime: rising when recording turns on, falling when it turns off.
      * Lets you know an earbud tap registered without looking at the phone.
      */
