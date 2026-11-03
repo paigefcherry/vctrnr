@@ -1,0 +1,7 @@
+<resources>
+    <!-- Compose draws the UI; this only covers the window before the first frame. -->
+    <style name="Theme.Vctrnr" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/window_background</item>
+        <item name="android:windowSplashScreenBackground">@color/window_background</item>
+    </style>
+</resources>
